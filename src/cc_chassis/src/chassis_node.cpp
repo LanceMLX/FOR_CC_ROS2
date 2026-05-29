@@ -7,6 +7,7 @@
 #include <algorithm>
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/twist.hpp"
+#include "navcase_interfaces/msg/control_command.hpp"
 
 // 强制1字节对齐，防止结构体填充影响协议解析
 #pragma pack(push, 1)
@@ -41,8 +42,8 @@ public:
         
         init_serial(port_name, baud_rate);
         
-        subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
-            "cmd_vel", 10, std::bind(&ChassisNode::topic_callback, this, std::placeholders::_1));
+        subscription_ = this->create_subscription<navcase_interfaces::msg::ControlCommand>(
+            "/navcase/chassis/control_cmd", 10, std::bind(&ChassisNode::topic_callback, this, std::placeholders::_1));
         
         // 50Hz 定时器读取串口返回数据
         read_timer_ = this->create_wall_timer(
@@ -88,7 +89,7 @@ private:
         tcsetattr(serial_fd_, TCSANOW, &options);
     }
 
-    void topic_callback(const geometry_msgs::msg::Twist::SharedPtr msg) const {
+    void topic_callback(const navcase_interfaces::msg::ControlCommand::SharedPtr msg) const {
         if (serial_fd_ < 0) return;
         
         ChassisFrame frame;
@@ -96,23 +97,35 @@ private:
         frame.id = 0x01; // 主机身份
         frame.length = 0x0B;
         frame.status = 0x01; // 状态: 正常
-        frame.mode = 0x00;   // 模式: 控制
         
-        // 线速度映射到电机速度 (假设 1.0 m/s 对应最大 PWM 1024)
-        int speed = std::min(1024, static_cast<int>(std::abs(msg->linear.x) * 1024.0));
-        uint8_t dir = (msg->linear.x >= 0) ? 0x00 : 0x01; // 0:正转 1:反转
-        
-        frame.m1_dir = dir;
-        frame.m1_spd_h = (speed >> 8) & 0xFF;
-        frame.m1_spd_l = speed & 0xFF;
-        frame.m2_dir = dir;
-        frame.m2_spd_h = (speed >> 8) & 0xFF;
-        frame.m2_spd_l = speed & 0xFF;
-        
-        // 角速度映射到舵机角度 (假设 -1.0~1.0 rad/s 映射到 0~255，128为正中)
-        int angle = 128 + static_cast<int>(msg->angular.z * 127.0);
-        angle = std::max(0, std::min(255, angle));
-        frame.servo_angle = angle;
+        if (msg->emergency_brake) {
+            frame.mode = 0x01; // 模式: 刹车
+            frame.m1_dir = 0x00;
+            frame.m1_spd_h = 0;
+            frame.m1_spd_l = 0;
+            frame.m2_dir = 0x00;
+            frame.m2_spd_h = 0;
+            frame.m2_spd_l = 0;
+            frame.servo_angle = 128; // 回正
+        } else {
+            frame.mode = 0x00;   // 模式: 控制
+            
+            // 线速度映射到电机速度 (假设 1.0 m/s 对应最大 PWM 1024)
+            int speed = std::min(1024, static_cast<int>(std::abs(msg->linear_velocity) * 1024.0));
+            uint8_t dir = (msg->linear_velocity >= 0) ? 0x00 : 0x01; // 0:正转 1:反转
+            
+            frame.m1_dir = dir;
+            frame.m1_spd_h = (speed >> 8) & 0xFF;
+            frame.m1_spd_l = speed & 0xFF;
+            frame.m2_dir = dir;
+            frame.m2_spd_h = (speed >> 8) & 0xFF;
+            frame.m2_spd_l = speed & 0xFF;
+            
+            // 角速度映射到舵机角度 (假设 -1.0~1.0 rad/s 映射到 0~255，128为正中)
+            int angle = 128 + static_cast<int>(msg->angular_velocity * 127.0);
+            angle = std::max(0, std::min(255, angle));
+            frame.servo_angle = angle;
+        }
         
         frame.voltage = 0x00; // 主机下发时不包含电压
         frame.sensor1 = 0x00; // 预留
@@ -170,7 +183,7 @@ private:
     }
     
     int serial_fd_;
-    rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr subscription_;
+    rclcpp::Subscription<navcase_interfaces::msg::ControlCommand>::SharedPtr subscription_;
     rclcpp::TimerBase::SharedPtr read_timer_;
     std::vector<uint8_t> rx_buffer_;
 };

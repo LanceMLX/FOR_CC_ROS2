@@ -1,0 +1,77 @@
+# ===== REQUEST =====
+#   基本配置
+string device_name          # 设备名称
+string device_id            # 设备ID
+string language             # 语言 "en", "zh", "ja", "ko"
+#   跟随配置
+float32 default_follow_distance   # 默认跟随距离 (m)
+float32 min_follow_distance       # 最小跟随距离 (m)
+float32 max_follow_distance       # 最大跟随距离 (m)
+float32 default_follow_speed      # 默认跟随速度 (m/s)
+bool follow_auto_adjust           # 自动调整跟随距离
+bool follow_vibration_alert       # 跟随时震动提醒
+#   导航配置
+bool use_gps_indoors         # 室内是否使用GPS
+bool use_imu_fusion          # 是否使用IMU融合
+float32 path_smoothing       # 路径平滑度 (0-1)
+bool avoid_stairs            # 避开楼梯
+bool avoid_elevators         # 避开电梯
+#   速度配置
+float32 max_speed_normal # 正常模式最大速度 (m/s)
+float32 max_speed_crowded # 拥挤模式最大速度 (m/s)
+float32 max_speed_indoors # 室内最大速度 (m/s)
+bool speed_adaptive        # 自适应速度
+# 安全配置
+float32 obstacle_distance_threshold # 障碍物距离阈值 (m)
+float32 collision_distance          # 碰撞距离 (m)
+bool emergency_brake_enabled        # 紧急制动开关
+bool tilt_detection_enabled         # 倾斜检测开关
+float32 max_tilt_angle              # 最大倾斜角度 (度)
+bool overload_detection             # 超载检测开关
+float32 max_weight                  # 最大重量 (kg)
+# 电池配置
+float32 low_battery_threshold       # 低电量阈值 (%)
+float32 critical_battery_threshold  # 严重低电量阈值 (%)
+bool auto_return_on_low_battery     # 低电量自动返回
+bool auto_charge_when_docked        # 接入时自动充电
+# 传感器配置
+bool gps_enabled           # GPS开关
+bool imu_enabled           # IMU开关
+bool lidar_enabled         # 激光雷达开关
+bool ultrasonic_enabled    # 超声波开关
+bool camera_enabled        # 摄像头开关
+int32 sensor_update_rate   # 传感器更新频率 (Hz)
+# 通信配置
+string wifi_ssid             # WiFi SSID
+string wifi_password # 密码
+bool ble_enabled # 蓝牙开关
+int32 ble_advertising_interval # 蓝牙广播间隔 (ms)
+bool cloud_sync_enabled    # 云同步开关
+string cloud_server        # 云服务器地址
+# 声音配置
+bool sound_enabled         # 声音开关
+float32 volume             # 音量 (0-100)
+bool voice_prompts         # 语音提示开关
+bool beep_on_action         #   动作时蜂鸣
+#   灯光配置
+bool led_enabled            # LED开关
+int32 led_brightness        # LED亮度 (0-255)
+bool led_breathing          # LED呼吸效果
+string led_color_mode       # LED颜色模式 "follow", "battery", "status"
+#   省电配置
+bool power_save_enabled     # 省电模式开关
+int32 sleep_timeout         # 休眠超时 (秒)
+bool auto_sleep             # 自动休眠
+bool deep_sleep_enabled     # 深度休眠开关
+#   校准配置
+bool auto_calibration       #自动校准开关
+int32 calibration_interval # 校准间隔 (小时)
+# 数据记录
+bool data_logging_enabled # 数据记录开关
+string log_level           # 日志级别 "debug", "info", "warn", "error"
+bool crash_reporting       # 崩溃报告开关
+---
+bool success                # 是否成功
+string message              # 结果信息
+int32 applied_changes       # 应用的更改数量
+bool requires_reboot        # 是否需要重启

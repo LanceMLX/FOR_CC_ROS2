@@ -8,9 +8,10 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(navcase_interfaces REQUIRED)
 
 add_executable(chassis_node src/chassis_node.cpp)
-ament_target_dependencies(chassis_node rclcpp geometry_msgs)
+ament_target_dependencies(chassis_node rclcpp geometry_msgs navcase_interfaces)
 
 install(TARGETS
   chassis_node

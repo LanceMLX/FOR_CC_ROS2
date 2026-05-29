@@ -1,0 +1,539 @@
+NavGo（纳行）自动导航行李箱（基于一代行
+李箱）​
+一.实现功能​
+ 1.控制模式​
+ ✅ 手动模式（manual）：通过遥控器（2.4G/蓝牙）直接控制电机启停、转向、速度；支持急停
+ 按钮。​
+ ✅ 自动驾驶模式（drive）：​
+   基于激光雷达+IMU+摄像头融合建图（SLAM），构建局部地图；​
+   支持路径规划（A* / Dijkstra / RRT*）与动态避障（TEB / DWA）；​
+   可设定目标点（APP/遥控器输入坐标或语音指令）；​
+   支持多段路径记忆与自动巡航（如机场航站楼→登机口）。​
+ ✅ 跟随模式（follow）：​
+   基于视觉+激光雷达融合的目标跟踪（YOLOv5 + PointNet++ 或 OpenPose + ICP配准）；​
+   支持人形/背包/手持物识别跟踪；​
+   距离自适应调节（0.5~2m可调），带防丢失报警（超距/遮挡时蜂鸣+APP推送）；​
+   支持多目标切换（长按遥控器切换跟随对象）。​
+ 2.辅助功能​
+ 🔋 智能电量管理：电池电压实时监测 → 低电预警（<20%）→ 自动返航充电（若支持无线充电
+ 座）；​
+ 📡 环境感知增强：​
+    激光雷达：360°扫描，检测静态/动态障碍物（精度±2cm）；​
+    IMU：补偿轮式里程计漂移，提升定位鲁棒性；​
+    摄像头：RGB-D（可选）用于语义分割（识别楼梯、台阶、水坑等危险区域）；​
+ 📱 人机交互：​
+    APP端（Android/iOS）：地图显示、轨迹回放、固件升级、故障诊断；​
+    遥控器：物理按键+OLED屏，支持模式切换、紧急制动、音量调节；​
+    语音提示（TTS模块）：模式切换提醒、低电警告、避障提示；​
+ 🛡️ 安全机制：​
+    硬件急停开关（机械式，断开电机驱动电源）​
+    软件看门狗（Linux主机异常重启）​
+    电机过流/过热保护（驱动板内置检测）​
+      防跌落检测（IMU检测垂直加速度突变，触发急停）​
+二.系统架构​
+
+
+
+
+三.阶段设计​
+1.第一阶段：完成手动模式，手柄控行李箱前进，后退，左转，右转。​
+2.第二阶段：实现跟随模式，手柄触发视觉锁定目标追踪，配合激光雷达避障，长按遥控器切换跟随对
+象。​
+3.第三阶段：实现自动驾驶模式，构建局部地图，支持路径规划，可设定目标点。​
+四.通信协议​
+1.单片机通信协议：​
+  ​      0​   1​    2​    3​    4​    5​    6​    7​    8​   9​    10​   11​   12​
+  帧结 帧头 ​          数据
+   构 ​             区长                                  数据区
+                    度
+
+
+  数据 0xAA​ 0x01​ 0x0B​ 0x01​ 0x00​ 0x00​ 0x00​ 0x00​ 0x00​ 0x00​ 0x00​ 0x00​ 0x00​
+
+
+  说明 帧头
+                 0x01 数据 系统 当前 电机 电机1速度                  电机 电机2速度        电池 舵机
+                 主机 长度 状态 运行 1方 （0-1024）​                 2方 （0-1024）​   电压 角度​
+                 0x03    0x00 模式 向 ​                       向             （0- （0-
+                 从机      -空闲​ 0x00 0x00                  0x00            255 255
+                                   正转                    正转               ） ）​
+                         0x01 控制 0x01                    0x01
+                         -正常​ 模式​ 反转                     反转
+                              0x01
+                         0x02 刹车
+                         -故障​ 模式​
+                         0x03 ​
+                         -过流​
+                         0x04
+                         -过热​
+
+ 说明：1.如果只有一个电机则电机2参数都为0​
+   2.波特率:115200​
+   3.主机发送一条指令从机返回一条状态帧​
+2.ROS2订阅发布数据结构：​
+ 代码块​
+ 1    1navcase_robot/​
+ 2    2├── navcase_interfaces/              #   接口包​
+ 3    3│     ├── CMakeLists.txt​
+ 4    4│     ├── package.xml​
+ 5    5│     ├── msg/​
+ 6    6│     │   ├── SensorData.msg​
+ 7    7│     │   ├── RobotStatus.msg​
+ 8    8│     │   ├── ControlCommand.msg​
+ 9    9│     │   ├── GpsData.msg​
+ 10   10│    │    ├── BatteryData.msg​
+ 11   11│    │    ├── ImuData.msg​
+ 12   12│    │    ├── ObstacleData.msg​
+ 13   13│    │    ├── FollowTarget.msg​
+ 14   14│    │    └── SystemInfo.msg​
+ 15   15│    ├── srv/​
+ 16   16│    │    ├── SetConfig.srv​
+ 17   17│    │    ├── GetInfo.srv​
+ 18   18│    │    ├── Calibrate.srv​
+ 19   19│    │    └── UpdateFirmware.srv​
+ 20   20│    └── action/​
+ 21   21│        ├── ControlAction.action​
+ 22   22│        ├── NavigationAction.action​
+ 23   23│        └── ReturnHomeAction.action​
+ 24   24│​
+ 25   25├── navcase_driver/                  #   驱动节点​
+ 26   26│    ├── CMakeLists.txt​
+ 27   27│    ├── package.xml​
+ 28   28│    ├── src/​
+ 29   29│    │    ├── sensor_driver.cpp​
+ 30   30│     │    ├── motor_driver.cpp​
+ 31   31│     │    └── gps_driver.cpp​
+ 32   32│     └── include/​
+ 33   33│          └── navcase_driver/​
+ 34   34│​
+ 35   35├── navcase_control/                  #   控制节点​
+ 36   36│     ├── CMakeLists.txt​
+ 37   37│     ├── package.xml​
+ 38   38│     ├── src/​
+ 39   39│     │    ├── controller.cpp​
+ 40   40│     │    ├── follower.cpp​
+ 41   41│     │    └── safety_monitor.cpp​
+ 42   42│     └── config/​
+ 43   43│          └── control_params.yaml​
+ 44   44│​
+ 45   45├── navcase_navigation/               #   导航节点​
+ 46   46│     ├── CMakeLists.txt​
+ 47   47│     ├── package.xml​
+ 48   48│     ├── src/​
+ 49   49│     │    ├── path_planner.cpp​
+ 50   50│     │    ├── obstacle_avoidance.cpp​
+ 51   51│     │    └── localization.cpp​
+ 52   52│     └── maps/​
+ 53   53│          └── airport_map.yaml​
+ 54   54│​
+ 55   55└── navcase_ui/                       # UI 节点​
+ 56   56      ├── CMakeLists.txt​
+ 57   57      ├── package.xml​
+ 58   58      ├── src/​
+ 59   59      │    ├── status_display.cpp​
+ 60   60      │    └── command_interface.cpp​
+ 61   61      └── launch/​
+ 62   62           └── navcase.launch.py​
+
+
+
+
+📡 完整主题定义​
+1. 数据主题：/navcase/{id}/sensor_data​
+消息定义：SensorData.msg​
+  代码块​
+  1   1#   时间戳​
+  2   2builtin_interfaces/Time timestamp​
+  3   34# GPS 数据​
+  4   5navcase_interfaces/msg/GpsData gps​
+  5   67#   电池数据​
+  6   8navcase_interfaces/msg/BatteryData battery​
+  7   910# IMU    数据​
+  8   11navcase_interfaces/msg/ImuData imu​
+  9   1213#   障碍物数据​
+  10   14navcase_interfaces/msg/ObstacleData obstacles​
+  11   1516#   轮速数据​
+  12   17float32 wheel_speed_left   #左轮速度 (m/s)​
+  13   18float32 wheel_speed_right # 右轮速度 (m/s)​
+  14   1920# 电机温度​
+  15   21float32 motor_temp_left   # 左电机温度 (°C)​
+  16   22float32 motor_temp_right  # 右电机温度 (°C)​
+  17   2324# 距离传感器​
+  18   25float32 distance_front    # 前方距离 (m)​
+  19   26float32 distance_rear     # 后方距离 (m)​
+  20   27float32 distance_left     # 左侧距离 (m)​
+  21   28float32 distance_right    # 右侧距离 (m)​
+  22   2930# 重量传感器​
+  23   31float32 weight            # 箱子重量 (kg)​
+  24   3233# 环境数据​
+  25   34float32 temperature       # 环境温度 (°C)​
+  26   35float32 humidity          # 环境湿度 (%)​
+
+
+
+
+子消息定义​
+GpsData.msg​
+   代码块​
+   1   1# GPS  位置​
+   2   2float64 latitude            # 纬度​
+   3   3float64 longitude           # 经度​
+   4   4float32 altitude            # 海拔高度 (m)​
+   5   56#   精度​
+   6   7float32 hdop                # 水平精度因子​
+   7   8float32 vdop                # 垂直精度因子​
+   8   910#   速度​
+   9   11float32 speed              # 地面速度 (m/s)​
+  10   12float32 heading            # 航向角 (度)​
+  11   1314#   卫星信息​
+  12   15int32 satellites_used      # 使用的卫星数量​
+  13   16int32 satellites_visible   # 可见卫星数量​
+  14   1718#   时间戳​
+  15   19int64 gps_time             # GPS  时间戳 (UTC)​
+
+BatteryData.msg​
+   代码块​
+   1   1#   电池状态​
+   2   2float32 voltage             # 电压 (V)​
+   3   3float32 current             # 电流 (A)​
+   4   4float32 percentage          # 电量百分比 (0-100)​
+   5   5float32 temperature         # 电池温度 (°C)​
+   6   67#   电池健康​
+   7   8float32 health_percentage   #   健康度百分比 (0-100)​
+   8   9int32 cycle_count           #   充电循环次数​
+   9   1011#   预计续航​
+  10   12float32 estimated_range      # 预计续航里程 (km)​
+  11   13float32 time_to_empty        # 预计剩余时间 (分钟)​
+  12   1415#   充电状态​
+  13   16bool charging                #   是否正在充电​
+  14   17bool charging_complete       #   是否充电完成​
+
+ImuData.msg​
+   代码块​
+   1   1#   加速度计​
+   2   2float32 accel_x              # X轴加速度 (m/s²)​
+   3   3float32 accel_y              # Y轴加速度 (m/s²)​
+   4   4float32 accel_z              # Z轴加速度 (m/s²)​
+   5   56#   陀螺仪​
+   6   7float32 gyro_x               # X轴角速度 (rad/s)​
+   7   8float32 gyro_y               # Y轴角速度 (rad/s)​
+   8   9float32 gyro_z               # Z轴角速度 (rad/s)​
+   9   1011#   磁力计​
+  10   12float32 mag_x                # X轴磁场强度 (uT)​
+  11   13float32 mag_y                # Y轴磁场强度 (uT)​
+  12   14float32 mag_z                # Z轴磁场强度 (uT)​
+  13   1516#   姿态角​
+  14   17float32 roll                 # 横滚角 (度)​
+  15   18float32 pitch                # 俯仰角 (度)​
+  16   19float32 yaw                  # 偏航角 (度)​
+  17   2021#   置信度​
+  18   22float32 orientation_confidence     #   姿态置信度 (0-1)​
+
+ObstacleData.msg​
+   代码块​
+   1   1#   障碍物数量​
+   2   2int32 obstacle_count​
+   3   34#   障碍物列表（最多10个）​
+   4   5float32[10] obstacle_distances      # 距离 (m)​
+   5   6float32[10] obstacle_angles         # 角度 (度，相对于行李箱前方)​
+   6   7int32[10] obstacle_types            # 0=未知, 1=人, 2=物体, 3=墙壁​
+   7   8float32[10] obstacle_sizes          # 大小 (m)​
+   8   910#   最近障碍物​
+   9   11float32 closest_distance     #   最近障碍物距离 (m)​
+  10   12float32 closest_angle        #   最近障碍物角度 (度)​
+  11   1314#   安全距离​
+  12   15float32 safety_distance      # 安全距离阈值 (m)​
+  13   16bool collision_warning       # 碰撞警告​
+
+
+
+
+2. 状态主题：/navcase/{id}/status​
+消息定义：RobotStatus.msg​
+   代码块​
+   1   1#   工作模式​
+   2   2string mode                 # "idle", "follow", "return", "manual",
+       "charging", "error"​
+   3   34#   连接状态​
+   4   5bool connected              #   是否连接​
+   5   6string connection_type      # "wifi", "ble", "none"​
+   6   7string connection_quality   # "excellent", "good", "fair", "poor"​
+   7   8int32 signal_strength       #   信号强度 (0-100)​
+   8   910#   电池状态​
+   9   11float32 battery_level      # 电量百分比 (0-100)​
+  10   12bool low_battery_warning   # 低电量警告​
+  11   13bool critical_battery      # 严重低电量​
+  12   1415#   跟随状态​
+  13   16navcase_interfaces/msg/FollowTarget follow_target​
+  14   17bool following             # 是否正在跟随​
+  15   18float32 follow_distance    # 当前跟随距离 (m)​
+  16   19float32 follow_offset      # 跟随偏移 (m)​
+  17   2021#   导航状态​
+  18   22bool navigating            # 是否正在导航​
+  19   23string current_goal        # 当前目标点​
+  20   24float32 distance_to_goal   # 到目标距离 (m)​
+  21   25float32 estimated_time     # 预计到达时间 (秒)​
+  22   2627#   速度状态​
+  23   28float32 current_speed      # 当前速度 (m/s)​
+  24   29float32 max_speed          # 最大速度 (m/s)​
+  25   30float32 average_speed      # 平均速度 (m/s)​
+  26   3132#   安全状态​
+  27   33bool emergency_stop        # 紧急停止​
+  28   34bool obstacle_detected     # 检测到障碍物​
+  29   35bool tilted                # 倾斜警告​
+  30   36bool overloaded            # 超载警告​
+  31   3738#   错误信息​
+  32   39int32 error_code           # 错误代码​
+  33   40string error_message       # 错误信息​
+  34   41bool error_active          # 是否有活动错误​
+  35   4243#   系统状态​
+  36   44float32 cpu_usage              使用率 (%)​
+                                    # CPU
+  37   45float32 memory_usage       # 内存使用率 (%)​
+  38   46float32 system_temp        # 系统温度 (°C)​
+  39   4748#   运行时间​
+  40   49int32 uptime_seconds       # 运行时间 (秒)​
+  41   50int32 total_distance       # 总行驶距离 (m)​
+
+
+
+
+子消息定义​
+FollowTarget.msg​
+   代码块​
+   1   1#   目标ID​
+  2   2string target_id            #   目标设备ID​
+  3   34#   目标位置​
+  4   5float64 target_latitude     # 目标纬度​
+  5   6float64 target_longitude    # 目标经度​
+  6   78#   目标状态​
+  7   9float32 target_distance     #到目标距离 (m)​
+  8   10float32 target_bearing     # 目标方位角 (度)​
+  9   11bool target_visible        # 目标是否可见​
+ 10   12bool target_lost           # 目标是否丢失​
+ 11   1314#   跟随参数​
+ 12   15float32 desired_distance   # 期望跟随距离 (m)​
+ 13   16float32 max_speed          # 跟随最大速度 (m/s)​
+ 14   17bool maintain_position     # 保持相对位置​
+
+
+
+
+3. 命令主题：/navcase/{id}/control_cmd​
+消息定义：ControlCommand.msg​
+  代码块​
+  1   1#   命令类型​
+  2   2string command              # "start", "stop", "follow", "return", "manual",
+      "emergency_stop"​
+  3   34#   跟随命令参数​
+  4   5string follow_target_id     #跟随目标ID​
+  5   6float32 follow_distance    # 跟随距离 (m，0.5-5.0)​
+  6   7float32 follow_speed       # 跟随速度 (m/s，0.5-3.0)​
+  7   8bool follow_maintain_position # 是否保持相对位置​
+  8   910# 导航命令参数​
+  9   11float64 goal_latitude      # 目标纬度​
+ 10   12float64 goal_longitude     # 目标经度​
+ 11   13string goal_name           # 目标名称（如"登机口A1"）​
+ 12   14bool use_optimal_path      # 是否使用最优路径​
+ 13   1516# 手动控制参数​
+ 14   17float32 linear_velocity    # 线速度 (m/s，-3.0到3.0)​
+ 15   18float32 angular_velocity   # 角速度 (rad/s，-1.57到1.57)​
+ 16   1920# 速度限制​
+ 17   21float32 max_speed          # 最大速度限制 (m/s)​
+ 18   22bool speed_limit_enabled   # 是否启用速度限制​
+ 19   2324# 安全参数​
+ 20   25float32 obstacle_distance # 障碍物检测距离 (m)​
+ 21   26bool collision_avoidance   # 是否启用避障​
+ 22   27bool emergency_brake       # 是否启用紧急制动​
+ 23   2829# 充电命令​
+ 24   30bool start_charging        # 开始充电​
+ 25   31bool stop_charging         # 停止充电​
+ 26   3233# 系统命令​
+ 27   34bool reboot                # 重启系统​
+ 28   35bool shutdown              # 关闭系统​
+ 29   36bool enter_standby         # 进入待机模式​
+ 30   37bool wake_up               # 唤醒系统​
+ 31   3839#   配置命令​
+ 32   40bool save_config            #   保存配置​
+ 33   41bool load_default_config    #   加载默认配置​
+ 34   4243#   时间戳​
+ 35   44builtin_interfaces/Time timestamp​
+ 36   45string command_source       #   命令来源 "app", "voice", "auto", "web"​
+
+
+
+4. 动作主题：/navcase/{id}/control_action​
+动作定义：ControlAction.action​
+  代码块​
+  1   1# ===== GOAL =====​
+  2   2#   动作类型​
+  3   3string action_type           # "follow", "navigate", "return_home", "patrol",
+      "custom_path"​
+  4   45#   跟随动作​
+  5   6string follow_target_id      目标ID​
+                                    #
+  6   7float32 follow_distance      跟随距离 (m)​
+                                    #
+  7   8float32 follow_duration    # 跟随持续时间 (秒，0=无限)​
+  8   9bool follow_wait_at_target # 到达目标后是否等待​
+  9   1011# 导航动作​
+ 10   12float64 goal_latitude      # 目标纬度​
+ 11   13float64 goal_longitude     # 目标经度​
+ 12   14string goal_name           # 目标名称​
+ 13   15bool navigate_via_points   # 是否通过中间点​
+ 14   16float64[10] via_latitudes # 中间点纬度​
+ 15   17float64[10] via_longitudes # 中间点经度​
+ 16   18int32 via_points_count     # 中间点数量​
+ 17   1920# 返回动作​
+ 18   21bool return_to_charging    # 返回充电站​
+ 19   22bool return_to_start       # 返回起点​
+ 20   23bool return_immediately    # 立即返回（忽略障碍物）​
+ 21   2425# 巡逻动作​
+ 22   26string patrol_route_name   # 巡逻路线名称​
+ 23   27bool patrol_loop           # 是否循环巡逻​
+ 24   28int32 patrol_loops         # 巡逻圈数​
+ 25   2930# 自定义路径​
+ 26   31float64[20] path_latitudes # 路径点纬度​
+ 27   32float64[20] path_longitudes# 路径点经度​
+ 28   33int32 path_points_count    # 路径点数量​
+ 29   3435# 通用参数​
+ 30   36float32 max_speed          # 最大速度 (m/s)​
+ 31   37bool collision_avoidance   # 避障开关​
+ 32   38float32 timeout_seconds    # 超时时间 (秒，0=无超时)​
+ 33   39bool cancellable           # 是否可取消​
+ 34   4041# ===== FEEDBACK =====​
+ 35   42#   当前状态​
+ 36   43string current_state        # "pending", "executing", "paused", "completed",
+      "cancelled", "failed"​
+ 37   4445#   进度信息​
+ 38   46float32 progress_percent    #进度百分比 (0-100)​
+ 39   47float32 distance_travelled # 已行驶距离 (m)​
+ 40   48float32 distance_remaining # 剩余距离 (m)​
+ 41   49float32 estimated_time_remaining # 预计剩余时间 (秒)​
+ 42   5051# 位置信息​
+ 43   52float64 current_latitude   # 当前纬度​
+ 44   53float64 current_longitude # 当前经度​
+ 45   54float32 current_heading    # 当前航向 (度)​
+ 46   5556# 速度信息​
+ 47   57float32 current_speed      # 当前速度 (m/s)​
+ 48   58float32 average_speed      # 平均速度 (m/s)​
+ 49   5960# 跟随信息​
+ 50   61float32 target_distance    # 到目标距离 (m)​
+ 51   62float32 target_bearing     # 目标方位 (度)​
+ 52   63bool target_visible        # 目标是否可见​
+ 53   6465# 障碍物信息​
+ 54   66bool obstacle_detected     # 是否检测到障碍物​
+ 55   67float32 obstacle_distance # 障碍物距离 (m)​
+ 56   6869# 错误信息​
+ 57   70int32 error_code           # 错误代码​
+ 58   71string error_message       # 错误信息​
+ 59   7273# 时间戳​
+ 60   74builtin_interfaces/Time timestamp​
+ 61   7576# ===== RESULT =====​
+ 62   77#   执行结果​
+ 63   78bool success                # 是否成功​
+ 64   79string result_message       # 结果信息​
+ 65   8081#   完成信息​
+ 66   82float32 total_distance      # 总行驶距离 (m)​
+ 67   83float32 total_time          # 总耗时 (秒)​
+ 68   84int32 waypoints_reached     # 到达的路径点数量​
+ 69   85int32 waypoints_total       # 总路径点数量​
+ 70   8687#   统计信息​
+ 71   88float32 max_speed_reached   # 达到的最大速度 (m/s)​
+ 72   89float32 average_speed       # 平均速度 (m/s)​
+ 73   90int32 obstacles_avoided     # 避开的障碍物数量​
+ 74   91int32 pauses_count          # 暂停次数​
+ 75   9293#   错误信息​
+ 76   94int32 final_error_code      #最终错误代码​
+ 77   95string final_error_message # 最终错误信息​
+ 78   9697# 时间戳​
+ 79   98builtin_interfaces/Time completion_time​
+
+
+
+
+5. 服务主题：/navcase/{id}/set_config​
+服务定义：SetConfig.srv​
+                                         编辑​
+  代码块​
+1    1# ===== REQUEST =====​
+2    2#   基本配置​
+3    3string device_name          # 设备名称​
+4    4string device_id            # 设备ID​
+5    5string language             # 语言 "en", "zh", "ja", "ko"​
+6    67#   跟随配置​
+7    8float32 default_follow_distance   # 默认跟随距离 (m)​
+8    9float32 min_follow_distance       # 最小跟随距离 (m)​
+9    10float32 max_follow_distance       # 最大跟随距离 (m)​
+10   11float32 default_follow_speed      # 默认跟随速度 (m/s)​
+11   12bool follow_auto_adjust           # 自动调整跟随距离​
+12   13bool follow_vibration_alert       # 跟随时震动提醒​
+13   1415#   导航配置​
+14   16bool use_gps_indoors         # 室内是否使用GPS​
+15   17bool use_imu_fusion          # 是否使用IMU融合​
+16   18float32 path_smoothing       # 路径平滑度 (0-1)​
+17   19bool avoid_stairs            # 避开楼梯​
+18   20bool avoid_elevators         # 避开电梯​
+19   2122#   速度配置​
+20   23float32 max_speed_normal     正常模式最大速度 (m/s)​
+                                    #
+21   24float32 max_speed_crowded # 拥挤模式最大速度 (m/s)​
+22   25float32 max_speed_indoors # 室内最大速度 (m/s)​
+23   26bool speed_adaptive        # 自适应速度​
+24   2728# 安全配置​
+25   29float32 obstacle_distance_threshold # 障碍物距离阈值 (m)​
+26   30float32 collision_distance          # 碰撞距离 (m)​
+27   31bool emergency_brake_enabled        # 紧急制动开关​
+28   32bool tilt_detection_enabled         # 倾斜检测开关​
+29   33float32 max_tilt_angle              # 最大倾斜角度 (度)​
+30   34bool overload_detection             # 超载检测开关​
+31   35float32 max_weight                  # 最大重量 (kg)​
+32   3637# 电池配置​
+33   38float32 low_battery_threshold       # 低电量阈值 (%)​
+34   39float32 critical_battery_threshold  # 严重低电量阈值 (%)​
+35   40bool auto_return_on_low_battery     # 低电量自动返回​
+36   41bool auto_charge_when_docked        # 接入时自动充电​
+37   4243# 传感器配置​
+38   44bool gps_enabled           # GPS开关​
+39   45bool imu_enabled           # IMU开关​
+40   46bool lidar_enabled         # 激光雷达开关​
+41   47bool ultrasonic_enabled    # 超声波开关​
+42   48bool camera_enabled        # 摄像头开关​
+43   49int32 sensor_update_rate   # 传感器更新频率 (Hz)​
+44   5051# 通信配置​
+45   52string wifi_ssid             # WiFi SSID​
+46   53string wifi_password            密码​
+                                    # WiFi
+47   54bool ble_enabled             蓝牙开关​
+                                    #
+48   55int32 ble_advertising_interval # 蓝牙广播间隔 (ms)​
+49   56bool cloud_sync_enabled    # 云同步开关​
+50   57string cloud_server        # 云服务器地址​
+51   5859# 声音配置​
+52   60bool sound_enabled         # 声音开关​
+53   61float32 volume             # 音量 (0-100)​
+54   62bool voice_prompts         # 语音提示开关​
+55   63bool beep_on_action         #   动作时蜂鸣​
+56   6465#   灯光配置​
+57   66bool led_enabled            # LED开关​
+58   67int32 led_brightness        # LED亮度 (0-255)​
+59   68bool led_breathing          # LED呼吸效果​
+60   69string led_color_mode       # LED颜色模式 "follow", "battery", "status"​
+61   7071#   省电配置​
+62   72bool power_save_enabled     # 省电模式开关​
+63   73int32 sleep_timeout         # 休眠超时 (秒)​
+64   74bool auto_sleep             # 自动休眠​
+65   75bool deep_sleep_enabled     # 深度休眠开关​
+66   7677#   校准配置​
+67   78bool auto_calibration       #自动校准开关​
+68   79int32 calibration_interval # 校准间隔 (小时)​
+69   8081# 数据记录​
+70   82bool data_logging_enabled # 数据记录开关​
+71   83string log_level           # 日志级别 "debug", "info", "warn", "error"​
+72   84bool crash_reporting       # 崩溃报告开关​
+73   8586# ===== RESPONSE =====​
+74   87bool success                # 是否成功​
+75   88string message              # 结果信息​
+76   89int32 applied_changes       # 应用的更改数量​
+77   90bool requires_reboot        # 是否需要重启​
+

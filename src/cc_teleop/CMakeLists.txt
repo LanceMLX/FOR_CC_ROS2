@@ -9,9 +9,10 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(navcase_interfaces REQUIRED)
 
 add_executable(joy_to_cmd_node src/joy_to_cmd.cpp)
-ament_target_dependencies(joy_to_cmd_node rclcpp sensor_msgs geometry_msgs)
+ament_target_dependencies(joy_to_cmd_node rclcpp sensor_msgs geometry_msgs navcase_interfaces)
 
 install(TARGETS
   joy_to_cmd_node

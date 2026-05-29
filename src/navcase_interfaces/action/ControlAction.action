@@ -1,0 +1,61 @@
+# ===== GOAL =====
+string action_type
+string follow_target_id
+float32 follow_distance
+float32 follow_duration
+bool follow_wait_at_target
+float64 goal_latitude
+float64 goal_longitude
+string goal_name
+bool navigate_via_points
+float64[10] via_latitudes
+float64[10] via_longitudes
+int32 via_points_count
+bool return_to_charging
+bool return_to_start
+bool return_immediately
+string patrol_route_name
+bool patrol_loop
+int32 patrol_loops
+float64[20] path_latitudes
+float64[20] path_longitudes
+int32 path_points_count
+float32 max_speed
+bool collision_avoidance
+float32 timeout_seconds
+bool cancellable
+---
+# ===== RESULT =====
+bool success
+string result_message
+float32 total_distance
+float32 total_time
+int32 waypoints_reached
+int32 waypoints_total
+float32 max_speed_reached
+float32 average_speed
+int32 obstacles_avoided
+int32 pauses_count
+int32 final_error_code
+string final_error_message
+builtin_interfaces/Time completion_time
+---
+# ===== FEEDBACK =====
+string current_state
+float32 progress_percent
+float32 distance_travelled
+float32 distance_remaining
+float32 estimated_time_remaining
+float64 current_latitude
+float64 current_longitude
+float32 current_heading
+float32 current_speed
+float32 average_speed
+float32 target_distance
+float32 target_bearing
+bool target_visible
+bool obstacle_detected
+float32 obstacle_distance
+int32 error_code
+string error_message
+builtin_interfaces/Time timestamp
