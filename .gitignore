@@ -1,19 +1,50 @@
+# ROS2 工作空间默认生成的目录
+build/
+install/
+log/
+
+# CMake / C++ 编译生成文件
 CMakeLists.txt.user
 CMakeCache.txt
-CMakeFiles
-CMakeScripts
-Testing
+CMakeFiles/
+CMakeScripts/
+Testing/
 Makefile
 cmake_install.cmake
 install_manifest.txt
 compile_commands.json
 CTestTestfile.cmake
-_deps
+_deps/
 CMakeUserPresets.json
 
-# CLion
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#cmake-build-*
+# C++ 编译中间文件和目标文件
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.out
+*.elf
+
+# Python 缓存文件 (ROS2项目中可能包含部分Python脚本或启动文件)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 操作系统自动生成的文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE / 编辑器相关
+.vscode/
+.idea/
+cmake-build-*/
+*.swp
+*.swo
+*~

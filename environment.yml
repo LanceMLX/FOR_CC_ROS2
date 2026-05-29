@@ -1,0 +1,19 @@
+name: cc_ros2
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+    # ROS2 colcon 编译核心依赖
+    - colcon-common-extensions
+    - catkin_pkg
+    - empy
+    - lark
+    - rospkg
+    - setuptools
+    
+    # 业务功能依赖 (例如 cc_vision 需要的 OpenCV)
+    - opencv-python
+    - numpy
