@@ -6,6 +6,12 @@
 class JoyToCmd : public rclcpp::Node {
 public:
     JoyToCmd() : Node("joy_to_cmd") {
+        this->declare_parameter<int>("axis_linear", 1);
+        this->declare_parameter<int>("axis_angular", 3);
+        this->declare_parameter<double>("max_linear_vel", 0.5);
+        this->declare_parameter<double>("max_angular_vel", 1.0);
+        this->declare_parameter<int>("btn_brake", 1);
+
         subscription_ = this->create_subscription<sensor_msgs::msg::Joy>(
             "joy", 10, std::bind(&JoyToCmd::joy_callback, this, std::placeholders::_1));
         publisher_ = this->create_publisher<navcase_interfaces::msg::ControlCommand>("/navcase/chassis/control_cmd", 10);
@@ -18,15 +24,21 @@ private:
         cmd.command = "manual";
         cmd.command_source = "joy";
         
-        // 假设摇杆轴1控制线速度，轴3控制角速度 (需根据实际手柄调整)
-        if (msg->axes.size() >= 4) {
-            cmd.linear_velocity = msg->axes[1] * 0.5;  // 最大 0.5 m/s
-            cmd.angular_velocity = msg->axes[3] * 1.0; // 最大 1.0 rad/s
+        int axis_linear = this->get_parameter("axis_linear").as_int();
+        int axis_angular = this->get_parameter("axis_angular").as_int();
+        double max_linear_vel = this->get_parameter("max_linear_vel").as_double();
+        double max_angular_vel = this->get_parameter("max_angular_vel").as_double();
+        int btn_brake = this->get_parameter("btn_brake").as_int();
+        
+        // 摇杆控制线速度与角速度
+        if (msg->axes.size() > (size_t)std::max(axis_linear, axis_angular)) {
+            cmd.linear_velocity = msg->axes[axis_linear] * max_linear_vel;
+            cmd.angular_velocity = msg->axes[axis_angular] * max_angular_vel;
         }
         
-        // 假设按键1 (B/圆圈) 作为紧急刹车
-        if (msg->buttons.size() >= 2) {
-            cmd.emergency_brake = (msg->buttons[1] == 1);
+        // 紧急刹车控制
+        if (msg->buttons.size() > (size_t)btn_brake) {
+            cmd.emergency_brake = (msg->buttons[btn_brake] == 1);
         } else {
             cmd.emergency_brake = false;
         }

@@ -1,0 +1,39 @@
+# ROS2 硬件全局参数配置
+# 通过通配符将这些参数应用到相应的节点
+
+chassis_node:
+  ros__parameters:
+    # --- 1. 底盘单片机配置 ---
+    port_name: "/dev/ttyUSB0"     # 单片机串口号
+    baud_rate: 115200             # 单片机波特率
+
+sllidar_node:
+  ros__parameters:
+    # --- 2. 激光雷达配置 ---
+    serial_port: "/dev/ttyUSB1"   # 雷达串口号
+    serial_baudrate: 115200       # 雷达波特率 (A1/A2通常为115200或256000)
+    frame_id: "laser"             # 激光雷达坐标系名称
+
+usb_cam:
+  ros__parameters:
+    # --- 3. 摄像头配置 ---
+    video_device: "/dev/video0"   # USB摄像头挂载路径
+    image_width: 640              # 采集宽度
+    image_height: 480             # 采集高度
+    pixel_format: "yuyv"          # 像素格式
+    camera_frame_id: "camera_link"
+
+joy_node:
+  ros__parameters:
+    # --- 4. 遥控手柄配置 ---
+    dev: "/dev/input/js0"         # 游戏手柄挂载路径
+    deadzone: 0.05                # 摇杆死区
+
+joy_to_cmd:
+  ros__parameters:
+    # --- 5. 遥控按键映射配置 ---
+    axis_linear: 1                # 线速度控制轴 (左摇杆上下)
+    axis_angular: 3               # 角速度控制轴 (右摇杆左右)
+    max_linear_vel: 0.5           # 最大线速度 (m/s)
+    max_angular_vel: 1.0          # 最大角速度 (rad/s)
+    btn_brake: 1                  # 紧急刹车按键 (通常为B/圆圈)

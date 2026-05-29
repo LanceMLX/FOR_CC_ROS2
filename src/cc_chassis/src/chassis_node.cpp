@@ -8,6 +8,10 @@
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "navcase_interfaces/msg/control_command.hpp"
+#include "nav_msgs/msg/odometry.hpp"
+#include "tf2_ros/transform_broadcaster.h"
+#include "tf2/LinearMath/Quaternion.h"
+#include "geometry_msgs/msg/transform_stamped.hpp"
 
 // 强制1字节对齐，防止结构体填充影响协议解析
 #pragma pack(push, 1)
@@ -33,7 +37,7 @@ struct ChassisFrame {
 
 class ChassisNode : public rclcpp::Node {
 public:
-    ChassisNode() : Node("chassis_node"), serial_fd_(-1) {
+    ChassisNode() : Node("chassis_node"), serial_fd_(-1), x_(0.0), y_(0.0), theta_(0.0) {
         this->declare_parameter<std::string>("port_name", "/dev/ttyUSB0");
         this->declare_parameter<int>("baud_rate", 115200);
         
@@ -44,6 +48,10 @@ public:
         
         subscription_ = this->create_subscription<navcase_interfaces::msg::ControlCommand>(
             "/navcase/chassis/control_cmd", 10, std::bind(&ChassisNode::topic_callback, this, std::placeholders::_1));
+        
+        odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("odom", 10);
+        tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+        last_time_ = this->get_clock()->now();
         
         // 50Hz 定时器读取串口返回数据
         read_timer_ = this->create_wall_timer(
@@ -164,6 +172,54 @@ private:
                         uint8_t voltage_raw = rx_buffer_[11];
                         uint8_t status = rx_buffer_[3];
                         
+                        // 里程计推算 (Odometry)
+                        int m1_speed = (rx_buffer_[6] << 8) | rx_buffer_[7];
+                        int m2_speed = (rx_buffer_[9] << 8) | rx_buffer_[10];
+                        double v = ((m1_speed + m2_speed) / 2.0) / 1024.0;
+                        if (rx_buffer_[5] == 0x01) v = -v; // 反转则速度为负
+                        
+                        int servo_angle = rx_buffer_[12];
+                        double w = 0.0;
+                        if (std::abs(v) > 0.001) { // 只有在移动时，舵机偏转才会产生角速度
+                            w = (servo_angle - 128) / 127.0; 
+                        }
+                        
+                        rclcpp::Time current_time = this->get_clock()->now();
+                        double dt = (current_time - last_time_).seconds();
+                        last_time_ = current_time;
+                        
+                        x_ += v * cos(theta_) * dt;
+                        y_ += v * sin(theta_) * dt;
+                        theta_ += w * dt;
+                        
+                        // 发布 TF
+                        geometry_msgs::msg::TransformStamped odom_tf;
+                        odom_tf.header.stamp = current_time;
+                        odom_tf.header.frame_id = "odom";
+                        odom_tf.child_frame_id = "base_link";
+                        odom_tf.transform.translation.x = x_;
+                        odom_tf.transform.translation.y = y_;
+                        odom_tf.transform.translation.z = 0.0;
+                        tf2::Quaternion q;
+                        q.setRPY(0, 0, theta_);
+                        odom_tf.transform.rotation.x = q.x();
+                        odom_tf.transform.rotation.y = q.y();
+                        odom_tf.transform.rotation.z = q.z();
+                        odom_tf.transform.rotation.w = q.w();
+                        tf_broadcaster_->sendTransform(odom_tf);
+                        
+                        // 发布 Odometry 消息
+                        nav_msgs::msg::Odometry odom;
+                        odom.header.stamp = current_time;
+                        odom.header.frame_id = "odom";
+                        odom.child_frame_id = "base_link";
+                        odom.pose.pose.position.x = x_;
+                        odom.pose.pose.position.y = y_;
+                        odom.pose.pose.orientation = odom_tf.transform.rotation;
+                        odom.twist.twist.linear.x = v;
+                        odom.twist.twist.angular.z = w;
+                        odom_pub_->publish(odom);
+                        
                         // 降频打印电池电压和驱动板状态
                         RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 5000, 
                             "收到驱动板数据 -> 状态: %d, 电池电压ADC: %d", status, voltage_raw);
@@ -183,7 +239,11 @@ private:
     }
     
     int serial_fd_;
+    double x_, y_, theta_;
+    rclcpp::Time last_time_;
     rclcpp::Subscription<navcase_interfaces::msg::ControlCommand>::SharedPtr subscription_;
+    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
+    std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     rclcpp::TimerBase::SharedPtr read_timer_;
     std::vector<uint8_t> rx_buffer_;
 };

@@ -5,12 +5,14 @@
 本项目是一个基于 **ROS2** 开发的智能导航小车系统，核心采用 **C++** 编程实现。项目旨在提供一套完整的自主移动机器人解决方案，涵盖底层硬件驱动、传感器数据融合、SLAM建图、路径规划以及视觉跟随等功能。项目运行环境为 **Linux 主机**（推荐 Ubuntu 22.04 / 20.04），**完全兼容并支持在 ARM64 架构的开发板（如树莓派 5B、Jetson Nano 等）上部署运行**。
 
 ### 核心目录结构
-- `src/cc_chassis/`：底盘控制驱动。
-- `src/cc_nav/`：导航配置文件。
-- `src/cc_teleop/`：手柄遥控转换。
-- `src/cc_vision/`：视觉跟随。
-- `src/navcase_interfaces/`：**核心通信接口包**，统一定义了 `SensorData`, `RobotStatus`, `ControlCommand` 等本项目专用消息。
-- `third_party/`：存放项目运行所依赖的第三方开源库或工具包（如 `sllidar_ros2`）。
+- `src/cc_chassis/`：底盘驱动节点，负责串口通信、控制指令解析，以及计算并发布**真实的轮式里程计 (Odometry)**。
+- `src/cc_nav/`：自动驾驶导航包，集成 `nav2` 和 `slam_toolbox` 的建图与导航配置，以及地图存储。
+- `src/cc_teleop/`：遥控模块，负责手柄摇杆与按键到 `ControlCommand` 话题的映射与紧急刹车。
+- `src/cc_vision/`：视觉模块，处理 OpenCV 图像桥接，实现 YOLO 等目标检测跟随算法。
+- `src/navcase_interfaces/`：**全局接口规范库**，统一定义了 `SensorData`、`ControlCommand` 等标准通信结构。
+- `src/cc_config/`：**全局硬件配置库**，通过 `hardware.yaml` 统一管理串口号、波特率、设备路径等硬编码参数。
+- `sdk/`：底层驱动库和说明（电机驱动、舵机控制）。
+- `third_party/`：外部依赖与第三方开源包（如思岚雷达 `sllidar_ros2` 驱动）。
 
 ---
 
@@ -123,9 +125,9 @@ Linux主机与电机驱动板之间通过 TTL 串口（波特率 115200）进行
 ### 4.1 环境搭建步骤
 
 1. **操作系统与 ROS2 版本要求**：
-   - 推荐系统：Ubuntu 22.04 LTS
-   - ROS2 版本：ROS2 Humble (若使用 Ubuntu 20.04 则对应 ROS2 Foxy)
-   - 安装指南参考：[ROS2 官方安装文档](https://docs.ros.org/en/humble/Installation.html)
+   - 推荐系统：Ubuntu 24.04 LTS (或兼容系统)
+   - ROS2 版本：ROS2 Jazzy Jalisco
+   - 安装指南参考：[ROS2 官方安装文档](https://docs.ros.org/en/jazzy/Installation.html)
 
 2. **Linux 系统依赖安装**：
    ```bash
@@ -134,7 +136,9 @@ Linux主机与电机驱动板之间通过 TTL 串口（波特率 115200）进行
    
    # 安装项目常用依赖工具
    sudo apt install -y build-essential git cmake
-   sudo apt install -y ros-$ROS_DISTRO-joy ros-$ROS_DISTRO-teleop-twist-joy ros-$ROS_DISTRO-navigation2 ros-$ROS_DISTRO-nav2-bringup ros-$ROS_DISTRO-cv-bridge ros-$ROS_DISTRO-image-transport ros-$ROS_DISTRO-usb-cam
+   # 安装视觉、SLAM建图和导航相关依赖
+   sudo apt install -y ros-$ROS_DISTRO-joy ros-$ROS_DISTRO-teleop-twist-joy ros-$ROS_DISTRO-navigation2 ros-$ROS_DISTRO-nav2-bringup ros-$ROS_DISTRO-cv-bridge ros-$ROS_DISTRO-image-transport ros-$ROS_DISTRO-usb-cam \
+                       ros-$ROS_DISTRO-slam-toolbox ros-$ROS_DISTRO-nav2-map-server
    ```
 
 ### 4.2 硬件接线指南
@@ -164,7 +168,14 @@ colcon build --symlink-install --cmake-args -DPython3_EXECUTABLE=/usr/bin/python
 source install/setup.bash
 ```
 
-### 4.4 各功能模式操作方法
+### 4.4 全局硬件配置修改 (`cc_config`)
+本项目的所有硬件端口参数均集中在 `cc_config` 包中进行管理。如果您的设备在插入后端口发生了变化（例如单片机变成了 `/dev/ttyUSB1` 或 `/dev/ttyAMA0`），请**不要修改任何代码**，直接编辑配置文件：
+
+1. 打开 `src/cc_config/config/hardware.yaml`
+2. 根据您的实际硬件挂载情况，修改 `port_name`, `serial_port`, `video_device` 或 `dev` 等字段。
+3. 保存后直接运行启动命令，所有节点均会自动读取新配置生效。
+
+### 4.5 各功能模式操作方法
 
 > **注意**：运行前请确保相关硬件的 USB 或串口已赋予权限（如 `sudo chmod 777 /dev/ttyUSB0`）。
 
@@ -186,6 +197,22 @@ source install/setup.bash
   ros2 launch cc_nav nav2_bringup.launch.py map:=<你的地图路径>.yaml
   ```
   在 RViz2 中使用 `2D Goal Pose` 工具指定目标点。
+
+- **SLAM 激光雷达建图模式**：
+  利用雷达扫描和底盘真实的轮式里程计（Odometry）生成环境 2D 地图：
+  ```bash
+  # 终端1：启动底盘与雷达
+  ros2 launch cc_chassis bringup.launch.py
+  # 终端2：启动手柄遥控
+  ros2 launch cc_teleop teleop_joy.launch.py
+  # 终端3：启动 SLAM Toolbox 建图节点
+  ros2 launch cc_nav mapping.launch.py
+  ```
+  建图过程可通过 `rviz2` 添加 Map 和 LaserScan 实时预览。遥控小车遍历环境后，保存地图：
+  ```bash
+  # 终端4：保存地图到 cc_nav/maps 目录
+  ros2 run nav2_map_server map_saver_cli -f ~/FOR_CC_ROS2/src/cc_nav/maps/my_room
+  ```
 
 - **自动跟随模式**：
   ```bash
