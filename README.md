@@ -13,6 +13,7 @@
 - `src/cc_config/`：**全局硬件配置库**，通过 `hardware.yaml` 统一管理串口号、波特率、设备路径等硬编码参数。
 - `sdk/`：底层驱动库和说明（电机驱动、舵机控制）。
 - `third_party/`：外部依赖与第三方开源包（如思岚雷达 `sllidar_ros2` 驱动）。
+- `tools/`：**硬件测试工具集**，包含脱离 ROS2 环境独立验证串口、摄像头、手柄等外设是否正常的 Python 脚本。
 
 ---
 
@@ -131,14 +132,22 @@ Linux主机与电机驱动板之间通过 TTL 串口（波特率 115200）进行
 
 2. **Linux 系统依赖安装**：
    ```bash
-   # 更新系统软件包
+   # 1. 更新系统软件包
    sudo apt update && sudo apt upgrade -y
    
-   # 安装项目常用依赖工具
+   # 2. 安装项目常用依赖工具
    sudo apt install -y build-essential git cmake
-   # 安装视觉、SLAM建图和导航相关依赖
+   
+   # 3. 安装视觉、SLAM建图和导航相关依赖
    sudo apt install -y ros-$ROS_DISTRO-joy ros-$ROS_DISTRO-teleop-twist-joy ros-$ROS_DISTRO-navigation2 ros-$ROS_DISTRO-nav2-bringup ros-$ROS_DISTRO-cv-bridge ros-$ROS_DISTRO-image-transport ros-$ROS_DISTRO-usb-cam \
                        ros-$ROS_DISTRO-slam-toolbox ros-$ROS_DISTRO-nav2-map-server
+   
+   # 4. 安装第三方硬件驱动 (以 CH343 串口芯片为例)
+   cd ~/FOR_CC_ROS2/third_party
+   git clone https://github.com/WCHSoftGroup/ch343ser_linux.git
+   cd ch343ser_linux/driver
+   make
+   sudo make install
    ```
 
 ### 4.2 硬件接线指南
@@ -222,7 +231,14 @@ source install/setup.bash
 
 ---
 
-## 5. 常见问题排查指引
+## 5. 独立硬件测试工具集 (tools)
+在正式启动 ROS2 之前，建议先使用 `tools` 目录下的脚本验证硬件连接是否正常。这些脚本完全脱离 ROS2，可以直接使用 Python 运行：
+
+- **单片机串口测试**：`python3 tools/test_serial.py` (验证底盘单片机通信及协议收发)
+- **USB摄像头测试**：`python3 tools/test_camera.py 0` (验证 OpenCV 图像读取，`0`代表`/dev/video0`)
+- **游戏手柄测试**：`python3 tools/test_joystick.py` (需 `pip install pygame`，实时显示摇杆和按键数值)
+
+## 6. 常见问题排查指引
 
 1. **设备权限不足（串口或 USB 无法打开）**
    - **症状**：节点启动报错，提示无法打开 `/dev/ttyUSB0` 或 `/dev/video0`。

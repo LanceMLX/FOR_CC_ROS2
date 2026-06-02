@@ -22,11 +22,11 @@ struct ChassisFrame {
     uint8_t status;       // [3] 系统状态 0-空闲,1-正常,2-故障,3-过流,4-过热
     uint8_t mode;         // [4] 运行模式 0-控制, 1-刹车
     uint8_t m1_dir;       // [5] 电机1方向 0-正转, 1-反转
-    uint8_t m1_spd_h;     // [6] 电机1速度 高8位 (0-1024)
-    uint8_t m1_spd_l;     // [7] 电机1速度 低8位
+    uint8_t m1_spd_l;     // [6] 电机1速度 低8位 (小端序)
+    uint8_t m1_spd_h;     // [7] 电机1速度 高8位 (0-1024)
     uint8_t m2_dir;       // [8] 电机2方向 0-正转, 1-反转
-    uint8_t m2_spd_h;     // [9] 电机2速度 高8位 (0-1024)
-    uint8_t m2_spd_l;     // [10] 电机2速度 低8位
+    uint8_t m2_spd_l;     // [9] 电机2速度 低8位 (小端序)
+    uint8_t m2_spd_h;     // [10] 电机2速度 高8位 (0-1024)
     uint8_t voltage;      // [11] 电池电压 (0-255)
     uint8_t servo_angle;  // [12] 舵机角度 (0-255)
     uint8_t sensor1;      // [13] 传感器1 (0-255)
@@ -104,35 +104,35 @@ private:
         frame.header = 0xAA;
         frame.id = 0x01; // 主机身份
         frame.length = 0x0B;
-        frame.status = 0x01; // 状态: 正常
+        frame.status = 0x00; // 状态: 实测 0x00
         
         if (msg->emergency_brake) {
             frame.mode = 0x01; // 模式: 刹车
             frame.m1_dir = 0x00;
-            frame.m1_spd_h = 0;
             frame.m1_spd_l = 0;
+            frame.m1_spd_h = 0;
             frame.m2_dir = 0x00;
-            frame.m2_spd_h = 0;
             frame.m2_spd_l = 0;
-            frame.servo_angle = 128; // 回正
+            frame.m2_spd_h = 0;
+            frame.servo_angle = 0; // 实测 0 为中位
         } else {
             frame.mode = 0x00;   // 模式: 控制
             
-            // 线速度映射到电机速度 (假设 1.0 m/s 对应最大 PWM 1024)
-            int speed = std::min(1024, static_cast<int>(std::abs(msg->linear_velocity) * 1024.0));
+            // 线速度映射到电机速度 (1.0 m/s 对应最高速度 150)
+            int speed = std::min(150, static_cast<int>(std::abs(msg->linear_velocity) * 150.0));
             uint8_t dir = (msg->linear_velocity >= 0) ? 0x00 : 0x01; // 0:正转 1:反转
             
             frame.m1_dir = dir;
-            frame.m1_spd_h = (speed >> 8) & 0xFF;
-            frame.m1_spd_l = speed & 0xFF;
+            frame.m1_spd_l = speed & 0xFF;         // 低位在前 (小端序)
+            frame.m1_spd_h = (speed >> 8) & 0xFF;  // 高位在后
             frame.m2_dir = dir;
-            frame.m2_spd_h = (speed >> 8) & 0xFF;
             frame.m2_spd_l = speed & 0xFF;
+            frame.m2_spd_h = (speed >> 8) & 0xFF;
             
-            // 角速度映射到舵机角度 (假设 -1.0~1.0 rad/s 映射到 0~255，128为正中)
-            int angle = 128 + static_cast<int>(msg->angular_velocity * 127.0);
-            angle = std::max(0, std::min(255, angle));
-            frame.servo_angle = angle;
+            // 角速度映射到舵机角度 (需根据实际实测范围调整，假设中位为0，正负偏转)
+            int angle = static_cast<int>(msg->angular_velocity * 127.0); // 范围可能不是0-255，而是以0为中位
+            angle = std::max(-128, std::min(127, angle));
+            frame.servo_angle = static_cast<uint8_t>(angle);
         }
         
         frame.voltage = 0x00; // 主机下发时不包含电压
@@ -173,15 +173,16 @@ private:
                         uint8_t status = rx_buffer_[3];
                         
                         // 里程计推算 (Odometry)
-                        int m1_speed = (rx_buffer_[6] << 8) | rx_buffer_[7];
-                        int m2_speed = (rx_buffer_[9] << 8) | rx_buffer_[10];
-                        double v = ((m1_speed + m2_speed) / 2.0) / 1024.0;
+                        int m1_speed = (rx_buffer_[7] << 8) | rx_buffer_[6]; // 小端序解析
+                        int m2_speed = (rx_buffer_[10] << 8) | rx_buffer_[9]; // 小端序解析
+                        double v = ((m1_speed + m2_speed) / 2.0) / 150.0;
                         if (rx_buffer_[5] == 0x01) v = -v; // 反转则速度为负
                         
-                        int servo_angle = rx_buffer_[12];
+                        int servo_angle = rx_buffer_[12]; // 如果中位是0，可能有符号位，这里暂且转成 signed char
+                        int8_t signed_angle = static_cast<int8_t>(servo_angle);
                         double w = 0.0;
                         if (std::abs(v) > 0.001) { // 只有在移动时，舵机偏转才会产生角速度
-                            w = (servo_angle - 128) / 127.0; 
+                            w = signed_angle / 127.0; 
                         }
                         
                         rclcpp::Time current_time = this->get_clock()->now();
