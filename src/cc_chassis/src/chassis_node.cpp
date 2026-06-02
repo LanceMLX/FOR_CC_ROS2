@@ -37,7 +37,13 @@ struct ChassisFrame {
 
 class ChassisNode : public rclcpp::Node {
 public:
-    ChassisNode() : Node("chassis_node"), serial_fd_(-1), x_(0.0), y_(0.0), theta_(0.0) {
+    enum class RobotMode {
+        MANUAL,
+        AUTO,
+        FOLLOW
+    };
+
+    ChassisNode() : Node("chassis_node"), serial_fd_(-1), x_(0.0), y_(0.0), theta_(0.0), current_mode_(RobotMode::MANUAL) {
         this->declare_parameter<std::string>("port_name", "/dev/ttyUSB0");
         this->declare_parameter<int>("baud_rate", 115200);
         
@@ -97,7 +103,7 @@ private:
         tcsetattr(serial_fd_, TCSANOW, &options);
     }
 
-    void topic_callback(const navcase_interfaces::msg::ControlCommand::SharedPtr msg) const {
+    void send_chassis_cmd(bool brake, double linear_vel, double angular_vel) const {
         if (serial_fd_ < 0) return;
         
         ChassisFrame frame;
@@ -106,7 +112,7 @@ private:
         frame.length = 0x0B;
         frame.status = 0x00; // 状态: 实测 0x00
         
-        if (msg->emergency_brake) {
+        if (brake) {
             frame.mode = 0x01; // 模式: 刹车
             frame.m1_dir = 0x00;
             frame.m1_spd_l = 0;
@@ -119,8 +125,8 @@ private:
             frame.mode = 0x00;   // 模式: 控制
             
             // 线速度映射到电机速度 (1.0 m/s 对应最高速度 150)
-            int speed = std::min(150, static_cast<int>(std::abs(msg->linear_velocity) * 150.0));
-            uint8_t dir = (msg->linear_velocity >= 0) ? 0x00 : 0x01; // 0:正转 1:反转
+            int speed = std::min(150, static_cast<int>(std::abs(linear_vel) * 150.0));
+            uint8_t dir = (linear_vel >= 0) ? 0x00 : 0x01; // 0:正转 1:反转
             
             frame.m1_dir = dir;
             frame.m1_spd_l = speed & 0xFF;         // 低位在前 (小端序)
@@ -130,7 +136,7 @@ private:
             frame.m2_spd_h = (speed >> 8) & 0xFF;
             
             // 角速度映射到舵机角度 (需根据实际实测范围调整，假设中位为0，正负偏转)
-            int angle = static_cast<int>(msg->angular_velocity * 127.0); // 范围可能不是0-255，而是以0为中位
+            int angle = static_cast<int>(angular_vel * 127.0); // 范围可能不是0-255，而是以0为中位
             angle = std::max(-128, std::min(127, angle));
             frame.servo_angle = static_cast<uint8_t>(angle);
         }
@@ -149,6 +155,47 @@ private:
         
         // 串口发送
         write(serial_fd_, &frame, sizeof(frame));
+    }
+
+    void topic_callback(const navcase_interfaces::msg::ControlCommand::SharedPtr msg) {
+        if (serial_fd_ < 0) return;
+        
+        // 1. 状态机切换逻辑
+        RobotMode req_mode = current_mode_;
+        if (msg->command == "manual") req_mode = RobotMode::MANUAL;
+        else if (msg->command == "auto") req_mode = RobotMode::AUTO;
+        else if (msg->command == "follow") req_mode = RobotMode::FOLLOW;
+
+        if (req_mode != current_mode_) {
+            std::string mode_str = (req_mode == RobotMode::MANUAL) ? "MANUAL (手动)" : 
+                                   (req_mode == RobotMode::AUTO) ? "AUTO (自动导航)" : "FOLLOW (视觉跟随)";
+            RCLCPP_INFO(this->get_logger(), "底盘 FSM: 驱动模式已切换至 %s", mode_str.c_str());
+            current_mode_ = req_mode;
+            
+            // 模式切换时，主动发送一次停止指令，防止暴冲
+            send_chassis_cmd(false, 0.0, 0.0);
+            return; 
+        }
+
+        // 2. 紧急刹车 (最高优先级)
+        if (msg->emergency_brake) {
+            send_chassis_cmd(true, 0.0, 0.0);
+            return;
+        }
+
+        // 3. 权限校验：根据当前 FSM 状态，决定是否响应指令来源
+        bool accept_cmd = false;
+        if (current_mode_ == RobotMode::MANUAL && msg->command_source == "joy") {
+            accept_cmd = true;
+        } else if (current_mode_ == RobotMode::AUTO && msg->command_source == "auto") {
+            accept_cmd = true;
+        } else if (current_mode_ == RobotMode::FOLLOW && msg->command_source == "vision") {
+            accept_cmd = true;
+        }
+
+        if (accept_cmd) {
+            send_chassis_cmd(false, msg->linear_velocity, msg->angular_velocity);
+        }
     }
     
     void read_serial() {
@@ -241,6 +288,7 @@ private:
     
     int serial_fd_;
     double x_, y_, theta_;
+    RobotMode current_mode_;
     rclcpp::Time last_time_;
     rclcpp::Subscription<navcase_interfaces::msg::ControlCommand>::SharedPtr subscription_;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;

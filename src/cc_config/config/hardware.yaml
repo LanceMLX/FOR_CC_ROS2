@@ -34,6 +34,7 @@ joy_to_cmd:
     # --- 5. 遥控按键映射配置 ---
     axis_linear: 1                # 线速度控制轴 (左摇杆上下)
     axis_angular: 3               # 角速度控制轴 (右摇杆左右)
-    max_linear_vel: 0.5           # 最大线速度 (m/s)
+    max_linear_vel: 1.0           # 最大线速度 (m/s) (对应单片机满速 150)
     max_angular_vel: 1.0          # 最大角速度 (rad/s)
     btn_brake: 1                  # 紧急刹车按键 (通常为B/圆圈)
+    btn_mode_switch: 0            # 模式切换按键 (通常为A/叉叉)
