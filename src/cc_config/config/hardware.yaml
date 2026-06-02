@@ -9,10 +9,12 @@ chassis_node:
 
 sllidar_node:
   ros__parameters:
-    # --- 2. 激光雷达配置 ---
-    serial_port: "/dev/ttyUSB1"   # 雷达串口号
-    serial_baudrate: 115200       # 雷达波特率 (A1/A2通常为115200或256000)
+    # --- 2. 激光雷达配置 (适用于思岚 C1) ---
+    serial_port: "/dev/ttyUSB0"   # 雷达串口号
+    serial_baudrate: 460800       # 思岚 C1 的默认波特率是 460800
     frame_id: "laser"             # 激光雷达坐标系名称
+    angle_compensate: true        # 角度补偿
+    scan_mode: "Standard"         # 扫描模式
 
 usb_cam:
   ros__parameters:
