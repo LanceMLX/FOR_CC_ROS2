@@ -17,3 +17,4 @@ dependencies:
     # 业务功能依赖 (例如 cc_vision 需要的 OpenCV)
     - opencv-python
     - numpy
+    - pyserial

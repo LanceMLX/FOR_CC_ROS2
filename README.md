@@ -186,7 +186,20 @@ source install/setup.bash
 
 ### 4.5 各功能模式操作方法
 
-> **注意**：运行前请确保相关硬件的 USB 或串口已赋予权限（如 `sudo chmod 777 /dev/ttyUSB0`）。
+> **注意（首次接入硬件建议先执行）**：运行前请先获取端口权限，避免 `/dev/ttyUSB0`、`/dev/video0` 打不开。
+>
+> **临时授权（当前开机周期有效）**
+> ```bash
+> sudo chmod 666 /dev/ttyUSB0
+> sudo chmod 666 /dev/video0
+> ```
+>
+> **长期授权（推荐）**
+> ```bash
+> sudo usermod -aG dialout $USER
+> sudo usermod -aG video $USER
+> ```
+> 执行后请重新登录系统（或重启）使用户组生效。
 
 - **启动底盘与激光雷达 (基础 Bringup)**：
   ```bash
@@ -246,7 +259,8 @@ source install/setup.bash
      ```bash
      sudo usermod -aG dialout $USER
      sudo usermod -aG video $USER
-     sudo chmod 777 /dev/ttyUSB0
+  sudo chmod 666 /dev/ttyUSB0
+  sudo chmod 666 /dev/video0
      ```
 
 2. **colcon build 编译报错 (如提示缺少 catkin_pkg 或 symlink 失败)**
