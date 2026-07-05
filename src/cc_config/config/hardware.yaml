@@ -34,9 +34,12 @@ joy_node:
 joy_to_cmd:
   ros__parameters:
     # --- 5. 遥控按键映射配置 ---
-    axis_linear: 1                # 线速度控制轴 (左摇杆上下)
-    axis_angular: 3               # 角速度控制轴 (右摇杆左右)
+    # 已检测到当前手柄为 Microsoft X-Box 360 pad
+    axis_linear: 1                # 左摇杆上下
+    axis_angular: 3               # 右摇杆左右
+    invert_linear_axis: true      # Xbox 360 手柄前推通常为负值，这里反向为前进
+    invert_angular_axis: false    # 右打为正，保持默认方向
     max_linear_vel: 1.0           # 最大线速度 (m/s) (对应单片机满速 150)
     max_angular_vel: 1.0          # 最大角速度 (rad/s)
-    btn_brake: 1                  # 紧急刹车按键 (通常为B/圆圈)
-    btn_mode_switch: 0            # 模式切换按键 (通常为A/叉叉)
+    btn_brake: 1                  # B 键紧急刹车
+    btn_mode_switch: 0            # A 键切换 manual/auto/follow

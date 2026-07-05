@@ -8,6 +8,8 @@ public:
     JoyToCmd() : Node("joy_to_cmd") {
         this->declare_parameter<int>("axis_linear", 1);
         this->declare_parameter<int>("axis_angular", 3);
+        this->declare_parameter<bool>("invert_linear_axis", true);
+        this->declare_parameter<bool>("invert_angular_axis", false);
         this->declare_parameter<double>("max_linear_vel", 0.5);
         this->declare_parameter<double>("max_angular_vel", 1.0);
         this->declare_parameter<int>("btn_brake", 1);
@@ -25,6 +27,8 @@ private:
         
         int axis_linear = this->get_parameter("axis_linear").as_int();
         int axis_angular = this->get_parameter("axis_angular").as_int();
+        bool invert_linear_axis = this->get_parameter("invert_linear_axis").as_bool();
+        bool invert_angular_axis = this->get_parameter("invert_angular_axis").as_bool();
         double max_linear_vel = this->get_parameter("max_linear_vel").as_double();
         double max_angular_vel = this->get_parameter("max_angular_vel").as_double();
         int btn_brake = this->get_parameter("btn_brake").as_int();
@@ -45,8 +49,18 @@ private:
         
         // 摇杆控制线速度与角速度
         if (msg->axes.size() > (size_t)std::max(axis_linear, axis_angular)) {
-            cmd.linear_velocity = msg->axes[axis_linear] * max_linear_vel;
-            cmd.angular_velocity = msg->axes[axis_angular] * max_angular_vel;
+            double linear_axis_value = msg->axes[axis_linear];
+            double angular_axis_value = msg->axes[axis_angular];
+
+            if (invert_linear_axis) {
+                linear_axis_value = -linear_axis_value;
+            }
+            if (invert_angular_axis) {
+                angular_axis_value = -angular_axis_value;
+            }
+
+            cmd.linear_velocity = linear_axis_value * max_linear_vel;
+            cmd.angular_velocity = angular_axis_value * max_angular_vel;
         }
         
         // 紧急刹车控制
